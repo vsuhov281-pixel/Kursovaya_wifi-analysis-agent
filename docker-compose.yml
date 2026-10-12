@@ -1,0 +1,16 @@
+# Удобный запуск:  docker compose up -d --build
+# Дашборд будет на http://localhost:8000
+services:
+  netagent:
+    build: .
+    container_name: netagent
+    ports:
+      - "8000:8000"
+    volumes:
+      - netagent-data:/app/data
+    env_file:
+      - .env
+    restart: unless-stopped
+
+volumes:
+  netagent-data:

@@ -1,93 +1,130 @@
-# Agnets try
+# NetAgent — агент мониторинга сети лаборатории
 
+Учебный проект-агент: опрашивает DHCP lease'ы и ARP-таблицу роутера,
+находит устройства без lease («теневые») и устаревшие lease'ы, копит
+статистику и показывает её на веб-дашборде. Данные берутся из lab-mcp
+— MCP-шлюза лаборатории (MikroTik, NetBox, Proxmox и др., 577 tools);
+если шлюз недоступен — автоматический fallback на демо-заглушки.
 
-
-## Getting started
-
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
-
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
-
-## Add your files
-
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+## Архитектура
 
 ```
-cd existing_repo
-git remote add origin https://fpm-gitlab.kubsu.ru/alex2037/agnets-try.git
-git branch -M main
-git push -uf origin main
+┌──────────────────────────────────────────────────────┐
+│  agent/agent.py      — агентный цикл (сердце)        │
+│  agent/planner.py    — выбор действий: LLM/фикс.план │
+│  agent/tools.py      — реестр tools                  │
+│  agent/lab.py        — источники: lab-mcp + заглушки │
+│  agent/mcp_client.py — SSE MCP-клиент (stdlib)       │
+│  agent/pipeline.py   — детерминированное сравнение   │
+│  agent/db.py         — SQLite (runs, devices)        │
+│  web/server.py       — HTTP API + опрос + дашборд    │
+└──────────────────────────────────────────────────────┘
 ```
 
-## Integrate with your tools
+Один цикл агента:
 
-* [Set up project integrations](https://fpm-gitlab.kubsu.ru/alex2037/agnets-try/-/settings/integrations)
+1. **Планировщик** выбирает tool сбора данных (`get_dhcp_leases`,
+   `scan_network`) — моделью LLM, если задан `LLM_API_KEY`, иначе
+   фиксированным планом (поведение одинаковое).
+2. **Агент** исполняет tool, результат — в контекст и в историю сообщений.
+3. Когда данные собраны, **pipeline** детерминированно сравнивает списки
+   (предварительно отсекая всё вне `LAN_INTERFACES`/`LAN_SUBNETS` — WAN,
+   туннели, APIPA, CGNAT не считаются «нашей сетью»):
+   есть и lease, и ARP → `active`;
+   живёт в сети без lease (ARP reachable) → `unknown_device` — тревожно;
+   раньше виделся без lease (ARP stale) → `unconfirmed_device` — наблюдаем;
+   lease есть, устройство молчит → `stale_lease`.
+4. Классификатор (LLM или эвристика) угадывает тип устройства.
+5. Результаты сохраняются в SQLite, дашборд их отображает.
 
-## Collaborate with your team
+Принцип: скучное и детерминированное — кодом, смысловое — LLM.
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+## Запуск локально (без Docker)
 
-## Test and Deploy
+Только Python 3.12+, зависимостей нет.
 
-Use the built-in continuous integration in GitLab.
+```bash
+# один цикл агента в консоли
+python run_agent.py
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+# веб-дашборд + автоматический опрос каждые N минут
+python -m web.server        # дашборд: http://localhost:8000
+```
 
-***
+## Запуск в Docker (Ubuntu Server 26.04)
 
-# Editing this README
+```bash
+docker build -t netagent .
+docker run -d --name netagent -p 8000:8000 -v netagent-data:/app/data netagent
+# или через compose (настройки — в .env, см. .env.example):
+docker compose up -d --build
+```
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+Дашборд: `http://<IP-сервера>:8000`. Кнопка «Опросить сейчас» запускает
+цикл агента немедленно.
 
-## Suggestions for a good README
+## Источник данных: lab-mcp
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+Интеграция уже работает. Агент ходит в MCP-шлюз лаборатории
+(`Docker AI MCP Gateway`, 577 инструментов) через `agent/mcp_client.py`:
 
-## Name
-Choose a self-explaining name for your project.
+- `get_dhcp_leases` → `mikrotik_query` с командой `/ip/dhcp-server/lease/print`
+  — все lease'ы MikroTik (status bound/waiting, hostname, expires);
+- `scan_network` → `mikrotik_query` с командой `/ip/arp/print` — ARP-таблица,
+  L2-реальность: устройства, точно присутствовавшие в сети, включая
+  устройства без DHCP lease.
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+Адрес шлюза — переменная окружения `LAB_MCP_URL`. Если шлюз недоступен,
+`agent/lab.py` автоматически переключается на демо-заглушки, чтобы проект
+можно было разрабатывать вне лаборатории. Формат ответов MikroTik в шлюзе
+— построчный `str(dict)`; парсинг — в `_parse_ros_table` (`ast.literal_eval`).
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+## API
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+| Метод | Путь | Описание |
+|---|---|---|
+| GET | `/api/health` | жив ли сервис |
+| GET | `/api/stats` | сводка: счётчики, динамика по опросам |
+| GET | `/api/devices?status=unknown_device` | список устройств (с фильтром) |
+| GET | `/api/runs` | история опросов |
+| GET | `/api/scan_now` | запустить цикл агента в фоне |
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+## Настройки (переменные окружения)
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+| Переменная | По умолчанию | Назначение |
+|---|---|---|
+| `SCAN_INTERVAL_MINUTES` | `15` | интервал автоматического опроса |
+| `WEB_PORT` | `8000` | порт дашборда |
+| `DB_PATH` | `data/agent.db` | путь к SQLite |
+| `LAB_MCP_URL` | `http://192.168.0.61:8100/sse` | адрес MCP-шлюза лаборатории |
+| `LAN_INTERFACES` | `bridge1-lan` | интерфейсы, считающиеся LAN (через запятую) |
+| `LAN_SUBNETS` | `192.168.0.0/16` | подсети LAN, CIDR через запятую |
+| `SMTP_HOST` / `SMTP_PORT` | — / `465` | SMTP-сервер для уведомлений |
+| `SMTP_USER` / `SMTP_PASSWORD` | — | логин и **пароль приложения** (Яндекс) |
+| `MAIL_TO` | — | получатели через запятую |
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+## Уведомления о новых теневых устройствах
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+Если в очередном опросе появляется живое устройство без DHCP lease
+(`unknown_device`), которого раньше в таком статусе не было (или оно
+эскалировало из `unconfirmed_device`), агент отправляет одно письмо
+со списком — не по письму на устройство. Отправка через SMTP (Яндекс:
+пароль приложения). Без `SMTP_PASSWORD` уведомления молча отключены,
+всё остальное работает. Ошибки отправки не прерывают цикл агента.
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+**Ограничение сети:** если сеть сервера блокирует исходящий SMTP
+(порты 25/465/587 — так делают многие университетские сети), письма
+не уйдут. Проверить можно командой:
+`python -c "import smtplib; smtplib.SMTP_SSL('smtp.yandex.ru', 465, timeout=10)"`
+| `LLM_API_KEY` | — | если задан — LLM-планировщик + классификация |
+| `LLM_BASE_URL` / `LLM_MODEL` | OpenAI / gpt-4o-mini | OpenAI-совместимый API |
+| `MAX_STEPS` | `10` | лимит шагов агентного цикла |
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+## Идеи для развития
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+- whitelist известных статических устройств (комментарий в lease),
+  чтобы зарезервированные адреса не числились «теневыми»;
+- OUI-lookup вендора по MAC (локальная база IEEE);
+- уведомления (Telegram/webhook) при появлении нового живого
+  `unknown_device` — самый тревожный класс;
+- экспорт истории в CSV.

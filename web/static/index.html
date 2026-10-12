@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NetAgent — мониторинг сети лаборатории</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root { --bg:#0f1420; --card:#1a2233; --text:#e6e9f0; --muted:#8b93a7;
+          --accent:#4f8cff; --ok:#3ecf8e; --warn:#f5b942; --bad:#ef5b5b; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:system-ui,Segoe UI,Roboto,sans-serif;
+         background:var(--bg); color:var(--text); }
+  header { padding:20px 28px 8px; display:flex; align-items:baseline; gap:16px; }
+  h1 { font-size:20px; margin:0; }
+  .muted { color:var(--muted); font-size:13px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+          gap:14px; padding:16px 28px; }
+  .card { background:var(--card); border-radius:12px; padding:16px 18px; }
+  .kpi .num { font-size:30px; font-weight:700; margin-top:4px; }
+  .charts { display:grid; grid-template-columns:1fr 2fr; gap:14px;
+            padding:0 28px; }
+  @media (max-width:900px) { .charts { grid-template-columns:1fr; } }
+  .card h3 { margin:0 0 10px; font-size:14px; color:var(--muted);
+             font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th,td { text-align:left; padding:7px 10px; border-bottom:1px solid #26304a; }
+  th { color:var(--muted); font-weight:600; }
+  .badge { padding:2px 9px; border-radius:99px; font-size:12px; white-space:nowrap; }
+  .b-active { background:#123527; color:var(--ok); }
+  .b-unknown_device { background:#3a2c10; color:var(--warn); }
+  .b-unconfirmed_device { background:#26304a; color:var(--muted); }
+  .b-stale_lease { background:#3a1a1a; color:var(--bad); }
+  .tablewrap { padding:14px 28px 30px; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px;
+           padding:7px 14px; cursor:pointer; font-size:13px; }
+  button:hover { filter:brightness(1.1); }
+  a { color:var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>NetAgent</h1>
+  <span class="muted">мониторинг DHCP и «теневых» устройств сети лаборатории</span>
+  <span style="flex:1"></span>
+  <button onclick="scanNow()">Опросить сейчас</button>
+</header>
+
+<div class="grid" id="kpis"></div>
+
+<div class="charts">
+  <div class="card"><h3>Статусы устройств</h3><canvas id="pie"></canvas></div>
+  <div class="card"><h3>Динамика по опросам</h3><canvas id="line"></canvas></div>
+</div>
+
+<div class="tablewrap">
+  <div class="card">
+    <h3>Устройства</h3>
+    <table>
+      <thead><tr><th>IP</th><th>MAC</th><th>Hostname</th><th>Вендор</th>
+        <th>Категория</th><th>Статус</th><th>Виден (опросов)</th></tr></thead>
+      <tbody id="devices"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const STATUS_RU = { active:'активно', unknown_device:'теневое (живое)', unconfirmed_device:'теневое (не подтв.)', stale_lease:'lease устарел' };
+
+async function jget(url){ const r = await fetch(url); return r.json(); }
+
+async function refresh(){
+  const [stats, devs] = await Promise.all([jget('/api/stats'), jget('/api/devices')]);
+  const bs = stats.by_status, T = stats.totals;
+
+  document.getElementById('kpis').innerHTML = [
+    ['Всего устройств', T.devices],
+    ['Активных', bs.active||0],
+    ['Теневых (живых)', bs.unknown_device||0],
+    ['Теневых (не подтв.)', bs.unconfirmed_device||0],
+    ['Lease устарел', bs.stale_lease||0],
+    ['Выполнено опросов', T.runs],
+  ].map(([l,v]) => `<div class="card kpi"><div class="muted">${l}</div>
+                    <div class="num">${v}</div></div>`).join('');
+
+  pieChart.data.datasets[0].data =
+    [bs.active||0, bs.unknown_device||0, bs.unconfirmed_device||0, bs.stale_lease||0];
+  pieChart.update();
+
+  const tl = stats.timeline;
+  lineChart.data.labels = tl.map(r => '#' + r.run_id);
+  const mk = k => tl.map(r => r[k]||0);
+  lineChart.data.datasets[0].data = mk('active');
+  lineChart.data.datasets[1].data = mk('unknown_device');
+  lineChart.data.datasets[2].data = mk('unconfirmed_device');
+  lineChart.data.datasets[3].data = mk('stale_lease');
+  lineChart.update();
+
+  document.getElementById('devices').innerHTML = devs.devices.map(d => `
+    <tr><td>${d.ip}</td><td class="muted">${d.mac}</td>
+        <td>${d.hostname||'<span class="muted">—</span>'}</td>
+        <td>${d.vendor||'—'}</td><td>${d.category}</td>
+        <td><span class="badge b-${d.status}">${STATUS_RU[d.status]||d.status}</span></td>
+        <td>${d.seen_runs}</td></tr>`).join('');
+}
+
+async function scanNow(){
+  await fetch('/api/scan_now');
+  setTimeout(refresh, 1500);   // дать агенту время закончить цикл
+}
+
+Chart.defaults.color = '#8b93a7';
+const pieChart = new Chart(document.getElementById('pie'), {
+  type:'doughnut',
+  data:{ labels:['активно','теневое (живое)','теневое (не подтв.)','lease устарел'],
+    datasets:[{ data:[0,0,0,0],
+      backgroundColor:['#3ecf8e','#f5b942','#8b93a7','#ef5b5b'], borderWidth:0 }]},
+  options:{ plugins:{legend:{position:'bottom'}} }
+});
+const lineChart = new Chart(document.getElementById('line'), {
+  type:'line',
+  data:{ labels:[], datasets:[
+    { label:'активно', data:[], borderColor:'#3ecf8e', tension:.3 },
+    { label:'теневое (живое)', data:[], borderColor:'#f5b942', tension:.3 },
+    { label:'теневое (не подтв.)', data:[], borderColor:'#8b93a7', tension:.3 },
+    { label:'lease устарел', data:[], borderColor:'#ef5b5b', tension:.3 }]},
+  options:{ plugins:{legend:{position:'bottom'}},
+            scales:{ y:{ beginAtZero:true, ticks:{stepSize:1} } } }
+});
+
+refresh();
+setInterval(refresh, 30000);
+</script>
+</body>
+</html>
