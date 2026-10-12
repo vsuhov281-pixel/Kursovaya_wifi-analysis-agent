@@ -13,6 +13,7 @@
 а LLM привлекается там, где нужен смысл — в Categorizer.
 """
 import json
+import re
 import urllib.request
 
 from . import config
@@ -77,9 +78,14 @@ class Categorizer:
                  '{"category": "одна строка на русском"}'},
                 {"role": "user", "content": text},
             ])
-            return json.loads(resp).get("category")
+            # модель может обернуть JSON в пояснения/markdown — достаём
+            # первый {...} вместо строгого разбора всего ответа
+            match = re.search(r"\{.*\}", resp, re.DOTALL)
+            if match:
+                return json.loads(match.group(0)).get("category")
         except Exception:
-            return None  # любая ошибка LLM → молча падаем на эвристику
+            pass  # любая ошибка LLM → молча падаем на эвристику
+        return None
 
 
 # ---------------------------------------------------------------------------
