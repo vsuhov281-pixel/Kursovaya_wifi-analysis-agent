@@ -40,7 +40,15 @@ class Agent:
 
         # --- этап 1: планировщик собирает данные ---------------------------
         for step in range(1, config.MAX_STEPS + 1):
-            action = self.planner.next_action(messages, self.registry)
+            try:
+                action = self.planner.next_action(messages, self.registry)
+            except Exception as exc:
+                # LLM недоступен/ошибся — не роняем цикл, доигрываем
+                # оставшиеся шаги детерминированным планом
+                self._log(f"планировщик {type(self.planner).__name__} ошибся: "
+                          f"{exc} — откат на ScriptedPlanner")
+                self.planner = ScriptedPlanner()
+                action = self.planner.next_action(messages, self.registry)
             if action.final is not None:
                 self._log(f"шаг {step}: планировщик завершил сбор — {action.final}")
                 break

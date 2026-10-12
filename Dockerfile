@@ -9,10 +9,13 @@ COPY agent ./agent
 COPY web ./web
 COPY run_agent.py ./
 
+# PYTHONUNBUFFERED: без него Python буферизует stdout в контейнере
+# и docker compose logs остаётся пустым
 ENV DB_PATH=/app/data/agent.db \
     WEB_HOST=0.0.0.0 \
     WEB_PORT=8000 \
-    SCAN_INTERVAL_MINUTES=15
+    SCAN_INTERVAL_MINUTES=15 \
+    PYTHONUNBUFFERED=1
 
 VOLUME ["/app/data"]
 EXPOSE 8000
