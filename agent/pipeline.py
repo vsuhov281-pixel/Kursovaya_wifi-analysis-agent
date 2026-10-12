@@ -36,11 +36,16 @@ def compare(leases: list[dict], scan: list[dict], categorizer: Categorizer) -> l
 
 
 def _make(dev: dict, status: str, categorizer: Categorizer) -> dict:
+    mac = dev.get("mac", "")
+    oui_vendor = categorizer.oui_vendor(mac)
     return {
         "ip": dev.get("ip", ""),
-        "mac": dev.get("mac", ""),
+        "mac": mac,
         "hostname": dev.get("hostname", ""),
-        "vendor": dev.get("vendor", ""),
-        "category": categorizer.category(dev.get("hostname", ""), dev.get("vendor", "")),
+        # заявленный вендор (из lease/scan), при пустом — из OUI по MAC
+        "vendor": dev.get("vendor", "") or oui_vendor,
+        "category": categorizer.category(
+            dev.get("hostname", ""), dev.get("vendor", ""),
+            mac=mac, ip=dev.get("ip", "")),
         "status": status,
     }
