@@ -97,16 +97,22 @@ class LlmClient:
             headers={"Content-Type": "application/json",
                      "Authorization": f"Bearer {self.api_key}"},
         )
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            return json.loads(resp.read())
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                return json.loads(resp.read())
+        except urllib.error.HTTPError as exc:
+            # тело ошибки API — главная зацепка для диагностики
+            detail = exc.read()[:500].decode(errors="replace")
+            raise RuntimeError(f"LLM HTTP {exc.code}: {detail}") from exc
 
     def chat(self, messages: list[dict]) -> str:
-        data = self._post({"model": self.model, "messages": messages, "temperature": 0})
+        # temperature не шлём: некоторые модели Kimi принимают только 1
+        data = self._post({"model": self.model, "messages": messages})
         return data["choices"][0]["message"].get("content") or ""
 
     def chat_tool_calls(self, messages: list[dict], tools: list[dict]) -> list[dict]:
         data = self._post({"model": self.model, "messages": messages,
-                           "tools": tools, "tool_choice": "auto", "temperature": 0})
+                           "tools": tools, "tool_choice": "auto"})
         return data["choices"][0]["message"].get("tool_calls") or []
 
 
