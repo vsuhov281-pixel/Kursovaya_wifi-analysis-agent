@@ -6,42 +6,74 @@
 <title>NetAgent — мониторинг сети лаборатории</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
-  :root { --bg:#0f1420; --card:#1a2233; --text:#e6e9f0; --muted:#8b93a7;
-          --accent:#4f8cff; --ok:#3ecf8e; --warn:#f5b942; --bad:#ef5b5b; }
-  * { box-sizing: border-box; }
-  body { margin:0; font-family:system-ui,Segoe UI,Roboto,sans-serif;
-         background:var(--bg); color:var(--text); }
-  header { padding:20px 28px 8px; display:flex; align-items:baseline; gap:16px; }
+  :root {
+    --bg:#0f1420; --card:#1a2233; --text:#e6e9f0;
+    --muted:#8b93a7; --accent:#4f8cff; --ok:#3ecf8e;
+    --warn:#f5b942; --bad:#ef5b5b;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; font-family:system-ui,Segoe UI,Roboto,sans-serif;
+    background:var(--bg); color:var(--text);
+  }
+  header {
+    padding:20px 28px 8px; display:flex;
+    align-items:baseline; gap:16px; flex-wrap:wrap;
+  }
   h1 { font-size:20px; margin:0; }
   .muted { color:var(--muted); font-size:13px; }
-  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
-          gap:14px; padding:16px 28px; }
+  .grid {
+    display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+    gap:14px; padding:16px 28px;
+  }
   .card { background:var(--card); border-radius:12px; padding:16px 18px; }
   .kpi .num { font-size:30px; font-weight:700; margin-top:4px; }
-  .charts { display:grid; grid-template-columns:1fr 2fr; gap:14px;
-            padding:0 28px; }
-  @media (max-width:900px) { .charts { grid-template-columns:1fr; } }
-  .card h3 { margin:0 0 10px; font-size:14px; color:var(--muted);
-             font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
+  .charts {
+    display:grid; grid-template-columns:1fr 2fr;
+    gap:14px; padding:0 28px;
+  }
+  @media (max-width:900px) {
+    .charts { grid-template-columns:1fr; }
+  }
+  .card h3 {
+    margin:0 0 10px; font-size:14px; color:var(--muted);
+    font-weight:600; text-transform:uppercase; letter-spacing:.04em;
+  }
+  .tablewrap { padding:14px 28px 30px; overflow-x:auto; }
   table { width:100%; border-collapse:collapse; font-size:13px; }
-  th,td { text-align:left; padding:7px 10px; border-bottom:1px solid #26304a; }
+  th,td {
+    text-align:left; padding:7px 10px;
+    border-bottom:1px solid #26304a;
+  }
   th { color:var(--muted); font-weight:600; }
-  .badge { padding:2px 9px; border-radius:99px; font-size:12px; white-space:nowrap; }
+  .badge {
+    padding:2px 9px; border-radius:99px;
+    font-size:12px; white-space:nowrap;
+  }
   .b-active { background:#123527; color:var(--ok); }
   .b-unknown_device { background:#3a2c10; color:var(--warn); }
   .b-unconfirmed_device { background:#26304a; color:var(--muted); }
   .b-stale_lease { background:#3a1a1a; color:var(--bad); }
-  .tablewrap { padding:14px 28px 30px; }
-  button { background:var(--accent); color:#fff; border:0; border-radius:8px;
-           padding:7px 14px; cursor:pointer; font-size:13px; }
+  button {
+    background:var(--accent); color:#fff; border:0;
+    border-radius:8px; padding:7px 14px; cursor:pointer;
+    font-size:13px;
+  }
   button:hover { filter:brightness(1.1); }
   a { color:var(--accent); }
+  .error { color:var(--bad); }
+  .signal-good { color:var(--ok); }
+  .signal-medium { color:var(--warn); }
+  .signal-bad { color:var(--bad); font-weight:700; }
+  .retry-high { color:var(--bad); font-weight:700; }
+  .retry-medium { color:var(--warn); }
 </style>
 </head>
 <body>
+
 <header>
   <h1>NetAgent</h1>
-  <span class="muted">мониторинг DHCP и «теневых» устройств сети лаборатории</span>
+  <span class="muted">Мониторинг сети лаборатории: DHCP, устройства и Wi-Fi</span>
   <span style="flex:1"></span>
   <button onclick="scanNow()">Опросить сейчас</button>
 </header>
@@ -49,87 +81,524 @@
 <div class="grid" id="kpis"></div>
 
 <div class="charts">
-  <div class="card"><h3>Статусы устройств</h3><canvas id="pie"></canvas></div>
-  <div class="card"><h3>Динамика по опросам</h3><canvas id="line"></canvas></div>
+  <div class="card">
+    <h3>Статусы устройств</h3>
+    <canvas id="pie"></canvas>
+  </div>
+  <div class="card">
+    <h3>Динамика по опросам</h3>
+    <canvas id="line"></canvas>
+  </div>
 </div>
 
 <div class="tablewrap">
   <div class="card">
     <h3>Устройства</h3>
     <table>
-      <thead><tr><th>IP</th><th>MAC</th><th>Hostname</th><th>Вендор</th>
-        <th>Категория</th><th>Статус</th><th>Виден (опросов)</th></tr></thead>
-      <tbody id="devices"></tbody>
+      <thead>
+        <tr>
+          <th>IP</th><th>MAC</th><th>Hostname</th><th>Вендор</th>
+          <th>Категория</th><th>Статус</th><th>Виден (опросов)</th>
+        </tr>
+      </thead>
+      <tbody id="devices">
+        <tr><td colspan="7">Загрузка устройств…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="tablewrap">
+  <div class="card">
+    <h3>История Wi-Fi (UniFi)</h3>
+    <p class="muted">
+      История сохранённых снимков контроллера. Обновляется каждые 30 секунд.
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Время сбора</th>
+          <th>Точек доступа</th>
+          <th>Клиентов</th>
+          <th>WLAN</th>
+          <th>Статус</th>
+        </tr>
+      </thead>
+      <tbody id="wifi-history">
+        <tr><td colspan="5">Загрузка истории Wi-Fi…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Подробная таблица Wi-Fi-клиентов -->
+<div class="tablewrap">
+  <div class="card">
+    <h3>Клиенты Wi-Fi</h3>
+    <p class="muted">
+      Последние измерения UniFi. Таблица обновляется каждые 30 секунд.
+      Красный сигнал или высокий процент повторных передач требуют проверки.
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Устройство</th>
+          <th>IP</th>
+          <th>SSID</th>
+          <th>Точка доступа</th>
+          <th>Сигнал, dBm</th>
+          <th>Канал</th>
+          <th>Повторные передачи, %</th>
+          <th>Satisfaction</th>
+          <th>Статус</th>
+        </tr>
+      </thead>
+      <tbody id="wifi-clients">
+        <tr><td colspan="9">Загрузка Wi-Fi-клиентов…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- История инцидентов Wi-Fi -->
+<div class="tablewrap">
+  <div class="card">
+    <h3>История аномалий Wi-Fi</h3>
+    <p class="muted">
+      Накопленные инциденты. Повторные обнаружения увеличивают счётчик;
+      исчезнувшие проблемы отмечаются как решённые. Обновление каждые 30 секунд.
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Статус</th>
+          <th>Уровень</th>
+          <th>Устройство</th>
+          <th>IP</th>
+          <th>Точка доступа</th>
+          <th>Причина</th>
+          <th>Обнаружений</th>
+          <th>Первое обнаружение</th>
+          <th>Последнее обнаружение</th>
+          <th>Аномалия больше не наблюдается</th>
+        </tr>
+      </thead>
+      <tbody id="wifi-anomaly-history">
+        <tr><td colspan="10">Загрузка истории аномалий…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Автоматически вычисляемые аномалии Wi-Fi -->
+<div class="tablewrap">
+  <div class="card">
+    <h3>Аномалии Wi-Fi</h3>
+    <p class="muted">
+      Проверка последнего снимка UniFi. Аномалия — повод для проверки,
+      а не доказательство неисправности. Обновление каждые 30 секунд.
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Уровень</th>
+          <th>Устройство</th>
+          <th>IP</th>
+          <th>Точка доступа</th>
+          <th>Обнаруженные признаки</th>
+          <th>Рекомендация</th>
+          <th>Время измерения</th>
+        </tr>
+      </thead>
+      <tbody id="wifi-anomalies">
+        <tr><td colspan="7">Поиск аномалий…</td></tr>
+      </tbody>
     </table>
   </div>
 </div>
 
 <script>
-const STATUS_RU = { active:'активно', unknown_device:'теневое (живое)', unconfirmed_device:'теневое (не подтв.)', stale_lease:'lease устарел' };
+const STATUS_RU = {
+  active: 'активно',
+  unknown_device: 'теневое (живое)',
+  unconfirmed_device: 'теневое (не подтв.)',
+  stale_lease: 'lease устарел'
+};
 
-async function jget(url){ const r = await fetch(url); return r.json(); }
-
-async function refresh(){
-  const [stats, devs] = await Promise.all([jget('/api/stats'), jget('/api/devices')]);
-  const bs = stats.by_status, T = stats.totals;
-
-  document.getElementById('kpis').innerHTML = [
-    ['Всего устройств', T.devices],
-    ['Активных', bs.active||0],
-    ['Теневых (живых)', bs.unknown_device||0],
-    ['Теневых (не подтв.)', bs.unconfirmed_device||0],
-    ['Lease устарел', bs.stale_lease||0],
-    ['Выполнено опросов', T.runs],
-  ].map(([l,v]) => `<div class="card kpi"><div class="muted">${l}</div>
-                    <div class="num">${v}</div></div>`).join('');
-
-  pieChart.data.datasets[0].data =
-    [bs.active||0, bs.unknown_device||0, bs.unconfirmed_device||0, bs.stale_lease||0];
-  pieChart.update();
-
-  const tl = stats.timeline;
-  lineChart.data.labels = tl.map(r => '#' + r.run_id);
-  const mk = k => tl.map(r => r[k]||0);
-  lineChart.data.datasets[0].data = mk('active');
-  lineChart.data.datasets[1].data = mk('unknown_device');
-  lineChart.data.datasets[2].data = mk('unconfirmed_device');
-  lineChart.data.datasets[3].data = mk('stale_lease');
-  lineChart.update();
-
-  document.getElementById('devices').innerHTML = devs.devices.map(d => `
-    <tr><td>${d.ip}</td><td class="muted">${d.mac}</td>
-        <td>${d.hostname||'<span class="muted">—</span>'}</td>
-        <td>${d.vendor||'—'}</td><td>${d.category}</td>
-        <td><span class="badge b-${d.status}">${STATUS_RU[d.status]||d.status}</span></td>
-        <td>${d.seen_runs}</td></tr>`).join('');
+async function jget(url) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${url}`);
+  }
+  return response.json();
 }
 
-async function scanNow(){
-  await fetch('/api/scan_now');
-  setTimeout(refresh, 1500);   // дать агенту время закончить цикл
+// Защита текста, полученного от устройств или API.
+function escapeHTML(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  })[ch]);
+}
+
+async function refresh() {
+  try {
+    const [stats, devs] = await Promise.all([
+      jget('/api/stats'),
+      jget('/api/devices')
+    ]);
+
+    const bs = stats.by_status || {};
+    const totals = stats.totals || {};
+
+    document.getElementById('kpis').innerHTML = [
+      ['Всего устройств', totals.devices ?? 0],
+      ['Активных', bs.active || 0],
+      ['Теневых (живых)', bs.unknown_device || 0],
+      ['Теневых (не подтв.)', bs.unconfirmed_device || 0],
+      ['Lease устарел', bs.stale_lease || 0],
+      ['Выполнено опросов', totals.runs ?? 0]
+    ].map(([label, value]) => `
+      <div class="card kpi">
+        <div class="muted">${label}</div>
+        <div class="num">${value}</div>
+      </div>
+    `).join('');
+
+    pieChart.data.datasets[0].data = [
+      bs.active || 0,
+      bs.unknown_device || 0,
+      bs.unconfirmed_device || 0,
+      bs.stale_lease || 0
+    ];
+    pieChart.update();
+
+    const timeline = stats.timeline || [];
+    lineChart.data.labels = timeline.map(row => '#' + row.run_id);
+
+    const values = key => timeline.map(row => row[key] || 0);
+    lineChart.data.datasets[0].data = values('active');
+    lineChart.data.datasets[1].data = values('unknown_device');
+    lineChart.data.datasets[2].data = values('unconfirmed_device');
+    lineChart.data.datasets[3].data = values('stale_lease');
+    lineChart.update();
+
+    document.getElementById('devices').innerHTML =
+      (devs.devices || []).map(device => `
+        <tr>
+          <td>${escapeHTML(device.ip)}</td>
+          <td class="muted">${escapeHTML(device.mac)}</td>
+          <td>${escapeHTML(device.hostname || '—')}</td>
+          <td>${escapeHTML(device.vendor || '—')}</td>
+          <td>${escapeHTML(device.category || '—')}</td>
+          <td>
+            <span class="badge b-${escapeHTML(device.status)}">
+              ${escapeHTML(STATUS_RU[device.status] || device.status)}
+            </span>
+          </td>
+          <td>${Number(device.seen_runs) || 0}</td>
+        </tr>
+      `).join('') || '<tr><td colspan="7">Устройства не найдены</td></tr>';
+
+  } catch (error) {
+    console.error('Ошибка обновления устройств:', error);
+  }
+}
+
+// История снимков UniFi.
+async function refreshWifiHistory() {
+  const tbody = document.getElementById('wifi-history');
+
+  try {
+    const data = await jget('/api/wifi');
+    const snapshots = data.snapshots || [];
+
+    if (snapshots.length === 0) {
+      tbody.innerHTML =
+        '<tr><td colspan="5">Сохранённых снимков пока нет</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = snapshots.map(snapshot => {
+      const date = snapshot.collected_at
+        ? new Date(snapshot.collected_at).toLocaleString('ru-RU')
+        : '—';
+
+      const success = snapshot.status === 'ok';
+      const status = success
+        ? '<span class="badge b-active">Успешно</span>'
+        : '<span class="badge b-stale_lease">Ошибка</span>';
+
+      const error = snapshot.error
+        ? `<div class="muted">${escapeHTML(snapshot.error)}</div>`
+        : '';
+
+      return `
+        <tr>
+          <td>${escapeHTML(date)}${error}</td>
+          <td>${Number(snapshot.ap_count) || 0}</td>
+          <td>${Number(snapshot.client_count) || 0}</td>
+          <td>${Number(snapshot.wlan_count) || 0}</td>
+          <td>${status}</td>
+        </tr>
+      `;
+    }).join('');
+
+  } catch (error) {
+    console.error('Ошибка загрузки истории Wi-Fi:', error);
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="5" class="error">
+          Не удалось загрузить историю. Проверь API /api/wifi.
+        </td>
+      </tr>
+    `;
+  }
+}
+
+// Подробные измерения Wi-Fi-клиентов.
+async function refreshWifiClients() {
+  const tbody = document.getElementById('wifi-clients');
+
+  try {
+    const data = await jget('/api/wifi/clients');
+    const clients = data.clients || [];
+
+    if (clients.length === 0) {
+      tbody.innerHTML =
+        '<tr><td colspan="9">Данных о Wi-Fi-клиентах пока нет</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = clients.map(client => {
+      const signal = client.signal_dbm;
+      const retries = client.wifi_tx_retries_percentage;
+      const satisfaction = client.satisfaction;
+
+      let signalClass = '';
+      if (signal !== null && signal !== undefined) {
+        if (signal <= -75) signalClass = 'signal-bad';
+        else if (signal <= -67) signalClass = 'signal-medium';
+        else signalClass = 'signal-good';
+      }
+
+      let retriesClass = '';
+      if (retries !== null && retries !== undefined) {
+        if (retries >= 30) retriesClass = 'retry-high';
+        else if (retries >= 15) retriesClass = 'retry-medium';
+      }
+
+      const signalText =
+        signal !== null && signal !== undefined ? `${signal} dBm` : '—';
+      const retriesText =
+        retries !== null && retries !== undefined ? `${retries}%` : '—';
+
+      const satisfactionText =
+        satisfaction !== null && satisfaction !== undefined
+          ? satisfaction
+          : '—';
+
+      const date = client.collected_at
+        ? new Date(client.collected_at).toLocaleString('ru-RU')
+        : '';
+
+      return `
+        <tr title="Время измерения: ${escapeHTML(date)}">
+          <td>${escapeHTML(client.hostname || 'Без имени')}</td>
+          <td>${escapeHTML(client.ip || '—')}</td>
+          <td>${escapeHTML(client.ssid || '—')}</td>
+          <td>${escapeHTML(client.ap_name || '—')}</td>
+          <td class="${signalClass}">${escapeHTML(signalText)}</td>
+          <td>${escapeHTML(client.channel ?? '—')}</td>
+          <td class="${retriesClass}">${escapeHTML(retriesText)}</td>
+          <td>${escapeHTML(satisfactionText)}</td>
+          <td>${escapeHTML(client.client_status || '—')}</td>
+        </tr>
+      `;
+    }).join('');
+
+  } catch (error) {
+    console.error('Ошибка загрузки Wi-Fi-клиентов:', error);
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="9" class="error">
+          Не удалось загрузить клиентов. Проверь API /api/wifi/clients.
+        </td>
+      </tr>
+    `;
+  }
+}
+
+
+// Аномалии вычисляются сервером по последнему сохранённому снимку.
+async function refreshWifiAnomalyHistory() {
+  const tbody = document.getElementById('wifi-anomaly-history');
+  if (!tbody) return;
+
+  try {
+    const data = await jget('/api/wifi/anomaly-history');
+    const history = data.history || [];
+
+    if (!history.length) {
+      tbody.innerHTML = '<tr><td colspan="10">История пока пуста. Дождитесь успешного опроса UniFi.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = history.map(item => {
+      const status = item.status === 'active' ? 'Активна' : 'Решена';
+      const severity = {
+        high: 'Высокая',
+        medium: 'Средняя',
+        info: 'Информация'
+      }[item.severity] || item.severity || '—';
+
+      return `<tr>
+        <td>${escapeHTML(status)}</td>
+        <td>${escapeHTML(severity)}</td>
+        <td>${escapeHTML(item.hostname || item.mac || 'Без имени')}</td>
+        <td>${escapeHTML(item.ip || '—')}</td>
+        <td>${escapeHTML(item.ap_name || '—')}</td>
+        <td>${escapeHTML(item.cause || '—')}</td>
+        <td>${escapeHTML(item.occurrences ?? 0)}</td>
+        <td>${escapeHTML(item.first_seen || '—')}</td>
+        <td>${escapeHTML(item.last_seen || '—')}</td>
+        <td>${escapeHTML(item.resolved_at || '—')}</td>
+      </tr>`;
+    }).join('');
+  } catch (error) {
+    console.error('Ошибка загрузки истории Wi-Fi:', error);
+    tbody.innerHTML = '<tr><td colspan="10" class="error">Не удалось загрузить историю. Проверь API /api/wifi/anomaly-history.</td></tr>';
+  }
+}
+
+async function refreshWifiAnomalies() {
+  const tbody = document.getElementById('wifi-anomalies');
+
+  try {
+    const data = await jget('/api/wifi/anomalies');
+    const anomalies = data.anomalies || [];
+
+    if (anomalies.length === 0) {
+      tbody.innerHTML =
+        '<tr><td colspan="7">По заданным правилам аномалий не обнаружено</td></tr>';
+      return;
+    }
+
+    const severityNames = {
+      high: 'Высокий',
+      medium: 'Средний',
+      info: 'Наблюдение'
+    };
+
+    const severityClasses = {
+      high: 'retry-high',
+      medium: 'retry-medium',
+      info: ''
+    };
+
+    tbody.innerHTML = anomalies.map(item => {
+      const measured = [
+        item.signal_dbm !== null ? `сигнал ${item.signal_dbm} dBm` : null,
+        item.retries !== null ? `повторы ${item.retries}%` : null,
+        item.satisfaction !== null ? `Satisfaction ${item.satisfaction}` : null
+      ].filter(Boolean).join('; ');
+
+      const date = item.collected_at
+        ? new Date(item.collected_at).toLocaleString('ru-RU')
+        : '—';
+
+      return `
+        <tr>
+          <td class="${severityClasses[item.severity] || ''}">
+            ${escapeHTML(severityNames[item.severity] || item.severity)}
+          </td>
+          <td>${escapeHTML(item.hostname || 'Без имени')}</td>
+          <td>${escapeHTML(item.ip || '—')}</td>
+          <td>${escapeHTML(item.ap_name || '—')}</td>
+          <td>${escapeHTML((item.causes || []).join('; '))}</td>
+          <td>${escapeHTML((item.recommendations || []).join('; '))}</td>
+          <td>${escapeHTML(date)}</td>
+        </tr>
+      `;
+    }).join('');
+  } catch (error) {
+    console.error('Ошибка загрузки аномалий Wi-Fi:', error);
+    tbody.innerHTML =
+      '<tr><td colspan="7" class="error">Не удалось загрузить аномалии. Проверь API /api/wifi/anomalies.</td></tr>';
+  }
+}
+
+async function scanNow() {
+  try {
+    const response = await fetch('/api/scan_now');
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+    setTimeout(() => {
+      refresh();
+      refreshWifiHistory();
+      refreshWifiClients();
+refreshWifiAnomalies();
+refreshWifiAnomalyHistory();
+    }, 5000);
+
+  } catch (error) {
+    console.error('Не удалось запустить опрос:', error);
+    alert('Не удалось запустить опрос. Проверь сервер.');
+  }
 }
 
 Chart.defaults.color = '#8b93a7';
+
 const pieChart = new Chart(document.getElementById('pie'), {
-  type:'doughnut',
-  data:{ labels:['активно','теневое (живое)','теневое (не подтв.)','lease устарел'],
-    datasets:[{ data:[0,0,0,0],
-      backgroundColor:['#3ecf8e','#f5b942','#8b93a7','#ef5b5b'], borderWidth:0 }]},
-  options:{ plugins:{legend:{position:'bottom'}} }
+  type: 'doughnut',
+  data: {
+    labels: [
+      'активно',
+      'теневое (живое)',
+      'теневое (не подтв.)',
+      'lease устарел'
+    ],
+    datasets: [{
+      data: [0, 0, 0, 0],
+      backgroundColor: ['#3ecf8e', '#f5b942', '#8b93a7', '#ef5b5b'],
+      borderWidth: 0
+    }]
+  },
+  options: {
+    plugins: { legend: { position: 'bottom' } }
+  }
 });
+
 const lineChart = new Chart(document.getElementById('line'), {
-  type:'line',
-  data:{ labels:[], datasets:[
-    { label:'активно', data:[], borderColor:'#3ecf8e', tension:.3 },
-    { label:'теневое (живое)', data:[], borderColor:'#f5b942', tension:.3 },
-    { label:'теневое (не подтв.)', data:[], borderColor:'#8b93a7', tension:.3 },
-    { label:'lease устарел', data:[], borderColor:'#ef5b5b', tension:.3 }]},
-  options:{ plugins:{legend:{position:'bottom'}},
-            scales:{ y:{ beginAtZero:true, ticks:{stepSize:1} } } }
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [
+      { label: 'активно', data: [], borderColor: '#3ecf8e', tension: .3 },
+      { label: 'теневое (живое)', data: [], borderColor: '#f5b942', tension: .3 },
+      { label: 'теневое (не подтв.)', data: [], borderColor: '#8b93a7', tension: .3 },
+      { label: 'lease устарел', data: [], borderColor: '#ef5b5b', tension: .3 }
+    ]
+  },
+  options: {
+    plugins: { legend: { position: 'bottom' } },
+    scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
+  }
 });
 
 refresh();
+refreshWifiHistory();
+refreshWifiClients();
+
 setInterval(refresh, 30000);
+setInterval(refreshWifiHistory, 30000);
+setInterval(refreshWifiClients, 30000);
+setInterval(refreshWifiAnomalies, 30000);
+setInterval(refreshWifiAnomalyHistory, 30000);
 </script>
 </body>
 </html>
+```

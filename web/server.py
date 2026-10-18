@@ -37,6 +37,100 @@ def scheduler_loop(interval_minutes: int) -> None:
         time.sleep(interval_minutes * 60)
 
 
+
+
+def build_wifi_anomalies(clients: list[dict]) -> list[dict]:
+    """Найти проблемы по последнему снимку клиентов UniFi."""
+    anomalies = []
+
+    for client in clients:
+        causes = []
+        recommendations = []
+        severity = "info"
+
+        def number(field):
+            value = client.get(field)
+            if value is None or value == "":
+                return None
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+
+        signal = number("signal_dbm")
+        retries = number("wifi_tx_retries_percentage")
+        satisfaction = number("satisfaction")
+
+        if signal is not None:
+            if signal <= -75:
+                severity = "high"
+                causes.append(f"слабый сигнал ({signal:g} dBm)")
+                recommendations.append(
+                    "Проверить расположение клиента, препятствия и покрытие ближайших AP"
+                )
+            elif signal <= -68:
+                if severity != "high":
+                    severity = "medium"
+                causes.append(f"сигнал ниже желательного ({signal:g} dBm)")
+                recommendations.append(
+                    "Наблюдать за сигналом; проверить покрытие и расположение клиента"
+                )
+
+        if retries is not None:
+            if retries >= 30:
+                severity = "high"
+                causes.append(f"высокие повторные передачи ({retries:g}%)")
+                recommendations.append(
+                    "Проверить загрузку канала, помехи и статистику радио на AP"
+                )
+            elif retries >= 15:
+                if severity != "high":
+                    severity = "medium"
+                causes.append(f"повышенные повторные передачи ({retries:g}%)")
+                recommendations.append(
+                    "Сравнить повторные измерения и проверить радиоканал"
+                )
+
+        if satisfaction is not None:
+            if satisfaction <= 70:
+                severity = "high"
+                causes.append(f"низкий Satisfaction ({satisfaction:g})")
+                recommendations.append(
+                    "Изучить качество соединения, потери и события клиента"
+                )
+            elif satisfaction <= 85:
+                if severity != "high":
+                    severity = "medium"
+                causes.append(f"пониженный Satisfaction ({satisfaction:g})")
+                recommendations.append(
+                    "Наблюдать за качеством соединения в следующих снимках"
+                )
+
+        if not causes:
+            continue
+
+        anomalies.append({
+            "severity": severity,
+            "hostname": client.get("hostname") or "Без имени",
+            "ip": client.get("ip"),
+            "mac": client.get("mac"),
+            "ap_name": client.get("ap_name"),
+            "signal_dbm": signal,
+            "retries": retries,
+            "satisfaction": satisfaction,
+            "causes": causes,
+            "recommendations": list(dict.fromkeys(recommendations)),
+            "collected_at": client.get("collected_at"),
+        })
+
+    order = {"high": 0, "medium": 1, "info": 2}
+    anomalies.sort(key=lambda item: (
+        order.get(item["severity"], 3),
+        item.get("hostname") or ""
+    ))
+    return anomalies
+
+
 # ---------------------------------------------------------------------------
 # HTTP handlers
 # ---------------------------------------------------------------------------
@@ -84,6 +178,14 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"devices": db.devices(status)})
         elif route == "/api/runs":
             self._json({"runs": db.runs()})
+        elif route == "/api/wifi":
+            self._json({"snapshots": db.wifi_snapshots(100)})
+        elif route == "/api/wifi/clients":
+            self._json({"clients": db.wifi_clients(500)})
+        elif route == "/api/wifi/anomalies":
+            self._json({"anomalies": build_wifi_anomalies(db.wifi_clients(500))})
+        elif route == "/api/wifi/anomaly-history":
+            self._json({"history": db.wifi_anomaly_history(200)})
         elif route == "/api/scan_now":
             threading.Thread(target=agent.run, daemon=True).start()
             self._json({"ok": True, "message": "цикл агента запущен в фоне"})

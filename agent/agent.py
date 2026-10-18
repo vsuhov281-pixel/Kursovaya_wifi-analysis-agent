@@ -18,6 +18,7 @@ from .db import DB
 from .planner import (Action, Categorizer, LlmPlanner, ScriptedPlanner,
                       SYSTEM_PROMPT, build_llm)
 from .tools import ToolRegistry, build_registry
+from .unifi import collect_unifi
 
 GOAL = "Собрать данные о сети: DHCP lease'ы и живые устройства."
 
@@ -26,11 +27,17 @@ class Agent:
     def __init__(self, db: DB, registry: ToolRegistry | None = None):
         self.db = db
         self.registry = registry or build_registry(db)
-        llm = build_llm()
-        self.categorizer = Categorizer(llm)
-        self.planner = LlmPlanner(llm) if llm else ScriptedPlanner()
+        # Базовый сбор должен работать без внешней LLM.
+        # Это исключает тайм-ауты модели из обязательного цикла мониторинга.
+        self.categorizer = Categorizer(None)
+        self.planner = ScriptedPlanner()
 
     def run(self, goal: str = GOAL) -> dict:
+        # Планировщик хранится в Agent между запусками.
+        # Сбрасываем фиксированную очередь перед каждым циклом.
+        if isinstance(self.planner, ScriptedPlanner):
+            self.planner = ScriptedPlanner()
+
         context: dict[str, list] = {}          # сырые результаты по именам tools
         messages: list[dict] = [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -79,6 +86,47 @@ class Agent:
             self._log(f"сохранено finding'ов: {saved}")
         else:
             self._log("данных недостаточно для сравнения — пропуск сохранения")
+
+        # --- этап Wi-Fi: сбор UniFi и сохранение снимка -------------------
+
+        wifi_data = collect_unifi()
+        try:
+            wifi_id = self.db.record_wifi_snapshot(wifi_data)
+            if wifi_data["status"] == "ok":
+                clients_saved = self.db.record_wifi_client_samples(
+                    wifi_data["collected_at"], wifi_data["clients"]
+                )
+                radios_saved = self.db.record_wifi_radio_samples(
+                    wifi_data["collected_at"], wifi_data["radios"]
+                )
+                events_saved = self.db.record_wifi_events(
+                    wifi_data["events"]
+                )
+
+                anomalies_saved = self.db.update_wifi_anomaly_history(
+                    wifi_data["collected_at"], wifi_data["clients"]
+                )
+                self._log(
+                    f"История Wi-Fi: обнаружений аномалий={anomalies_saved}"
+                )
+
+                self._log(
+                    f"UniFi snapshot #{wifi_id}: "
+                    f"AP={wifi_data['ap_count']}, "
+                    f"clients={wifi_data['client_count']}, "
+                    f"WLAN={wifi_data['wlan_count']}"
+                )
+                self._log(
+                    f"Wi-Fi детали: клиентов={clients_saved}, "
+                    f"радио={radios_saved}, "
+                    f"новых событий={events_saved}"
+                )
+            else:
+                self._log(
+                    f"UniFi сбор не удался: {wifi_data['error']}"
+                )
+        except Exception as exc:
+            self._log(f"ошибка сохранения снимка UniFi: {exc}")
 
         # --- этап 3: итог --------------------------------------------------
         summary = {
