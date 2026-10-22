@@ -461,6 +461,108 @@ class DB:
         return self.conn.total_changes - before
 
     # --- чтение (для веб-API) ---------------------------------------------
+
+    def wifi_client_history(
+        self, mac: str, limit: int = 100
+    ) -> list[dict]:
+        """История измерений конкретного Wi-Fi-клиента."""
+        rows = self.conn.execute(
+            """
+            SELECT collected_at, mac, hostname, ip, ssid,
+                   ap_name, ap_mac, signal_dbm, channel, radio,
+                   tx_rate, rx_rate, wifi_tx_retries_percentage,
+                   satisfaction, client_status
+            FROM (
+                SELECT *
+                FROM wifi_client_samples
+                WHERE lower(mac) = lower(?)
+                ORDER BY collected_at DESC
+                LIMIT ?
+            )
+            ORDER BY collected_at ASC
+            """,
+            (mac, max(1, min(int(limit), 1000))),
+        )
+        return [dict(row) for row in rows]
+
+    def wifi_ap_history(self, limit: int = 100) -> list[dict]:
+        """Число клиентов на каждой AP по времени."""
+        rows = self.conn.execute(
+            """
+            WITH recent_times AS (
+                SELECT DISTINCT collected_at
+                FROM wifi_client_samples
+                ORDER BY collected_at DESC
+                LIMIT ?
+            )
+            SELECT
+                s.collected_at,
+                COALESCE(
+                    NULLIF(s.ap_name, ''),
+                    NULLIF(s.ap_mac, ''),
+                    'Неизвестная AP'
+                ) AS ap_name,
+                s.ap_mac,
+                COUNT(DISTINCT s.mac) AS client_count
+            FROM wifi_client_samples AS s
+            JOIN recent_times AS r
+              ON r.collected_at = s.collected_at
+            GROUP BY s.collected_at, s.ap_name, s.ap_mac
+            ORDER BY s.collected_at ASC, ap_name ASC
+            """,
+            (max(1, min(int(limit), 1000)),),
+        )
+        return [dict(row) for row in rows]
+
+    def wifi_stale_clients(self, hours: int = 24) -> list[dict]:
+        """
+        Клиенты, давно не наблюдавшиеся в успешных снимках.
+        Это не доказательство неисправности устройства.
+        """
+        hours = max(1, min(int(hours), 8760))
+
+        rows = self.conn.execute(
+            """
+            WITH latest_success AS (
+                SELECT MAX(collected_at) AS collected_at
+                FROM wifi_snapshots
+                WHERE status = 'ok'
+            ),
+            last_seen AS (
+                SELECT
+                    mac,
+                    MAX(collected_at) AS last_seen,
+                    MAX(hostname) AS hostname,
+                    MAX(ip) AS ip,
+                    MAX(ap_name) AS last_ap,
+                    MAX(ssid) AS last_ssid
+                FROM wifi_client_samples
+                GROUP BY mac
+            )
+            SELECT
+                l.mac,
+                l.hostname,
+                l.ip,
+                l.last_ap,
+                l.last_ssid,
+                l.last_seen,
+                ROUND(
+                    (julianday('now') - julianday(l.last_seen)) * 24,
+                    1
+                ) AS hours_since_seen
+            FROM last_seen AS l
+            CROSS JOIN latest_success AS s
+            WHERE s.collected_at IS NOT NULL
+              AND l.last_seen < s.collected_at
+              AND julianday(l.last_seen)
+                    <= julianday('now', ?)
+            ORDER BY l.last_seen ASC
+            LIMIT 500
+            """,
+            (f"-{hours} hours",),
+        )
+        return [dict(row) for row in rows]
+
     def stats(self) -> dict:
         by_status = {
             r["status"]: r["n"]

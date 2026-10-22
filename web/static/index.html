@@ -67,6 +67,36 @@
   .signal-bad { color:var(--bad); font-weight:700; }
   .retry-high { color:var(--bad); font-weight:700; }
   .retry-medium { color:var(--warn); }
+
+  /* Dashboard layout refresh */
+  body { line-height: 1.5; }
+  header { max-width: 1600px; margin: 0 auto; padding-top: 24px; }
+  .grid, .charts, .tablewrap { max-width: 1600px; margin-left: auto; margin-right: auto; }
+  .card { border: 1px solid #26304a; box-shadow: 0 5px 18px #00000012; }
+  .card h3 { text-transform: none; letter-spacing: 0; color: var(--text); font-size: 15px; }
+  .tablewrap { padding-top: 10px; padding-bottom: 14px; }
+  .charts canvas { max-height: 300px; }
+  .diagnostic { padding-top: 6px; padding-bottom: 6px; }
+  .diagnostic > summary {
+    cursor: pointer; color: var(--text); font-weight: 600;
+    background: var(--card); border: 1px solid #26304a;
+    border-radius: 10px; padding: 13px 16px; list-style-position: inside;
+  }
+  .diagnostic[open] > summary { border-radius: 10px 10px 0 0; }
+  .diagnostic > .card { border-radius: 0 0 10px 10px; }
+  .diagnostic .card > h3 { display: none; }
+  table { min-width: 760px; }
+  th { white-space: nowrap; }
+  tbody tr:hover { background: #ffffff08; }
+  select { background: var(--card); color: var(--text); border: 1px solid #39445f; padding: 8px; border-radius: 6px; }
+  @media (max-width: 700px) {
+    header { padding: 16px; }
+    .grid { padding: 12px 16px; }
+    .charts { padding: 0 16px; }
+    .tablewrap { padding-left: 16px; padding-right: 16px; }
+    .kpi .num { font-size: 25px; }
+  }
+
 </style>
 </head>
 <body>
@@ -91,7 +121,7 @@
   </div>
 </div>
 
-<div class="tablewrap">
+<details class="tablewrap diagnostic"><summary>Устройства</summary>
   <div class="card">
     <h3>Устройства</h3>
     <table>
@@ -106,9 +136,9 @@
       </tbody>
     </table>
   </div>
-</div>
+</details>
 
-<div class="tablewrap">
+<details class="tablewrap diagnostic"><summary>История Wi-Fi (UniFi)</summary>
   <div class="card">
     <h3>История Wi-Fi (UniFi)</h3>
     <p class="muted">
@@ -129,7 +159,7 @@
       </tbody>
     </table>
   </div>
-</div>
+</details>
 
 <!-- Подробная таблица Wi-Fi-клиентов -->
 <div class="tablewrap">
@@ -151,17 +181,78 @@
           <th>Повторные передачи, %</th>
           <th>Satisfaction</th>
           <th>Статус</th>
+          <th>Анализ</th>
         </tr>
       </thead>
       <tbody id="wifi-clients">
-        <tr><td colspan="9">Загрузка Wi-Fi-клиентов…</td></tr>
+        <tr><td colspan="10">Загрузка Wi-Fi-клиентов…</td></tr>
       </tbody>
     </table>
+  </div>
+  <section id="wifi-ai-panel" style="display:none; margin-top:16px; padding:16px; border:1px solid var(--border-color, #ccc); border-radius:8px;">
+    <h3 id="wifi-ai-title">Анализ Wi-Fi-клиента</h3>
+    <p id="wifi-ai-status">Ожидание…</p>
+    <pre id="wifi-ai-result" style="white-space:pre-wrap; overflow-wrap:anywhere;"></pre>
+  </section>
+</div>
+
+
+<!-- Аналитика нагрузки точек доступа -->
+<div class="tablewrap">
+  <div class="card">
+    <h3>Нагрузка точек доступа</h3>
+    <p class="muted">
+      Изменение количества подключённых клиентов по сохранённым снимкам UniFi.
+    </p>
+    <canvas id="wifi-ap-history-chart"></canvas>
+  </div>
+</div>
+
+<!-- Давно не наблюдавшиеся клиенты -->
+<details class="tablewrap diagnostic"><summary>Давно не наблюдавшиеся клиенты</summary>
+  <div class="card">
+    <h3>Давно не наблюдавшиеся клиенты</h3>
+    <p class="muted">
+      Устройства, отсутствующие в последних измерениях более 24 часов.
+      Это не обязательно неисправность: устройство могло отключиться.
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Устройство</th>
+          <th>MAC</th>
+          <th>IP</th>
+          <th>Последняя точка</th>
+          <th>SSID</th>
+          <th>Последнее наблюдение</th>
+          <th>Часов назад</th>
+        </tr>
+      </thead>
+      <tbody id="wifi-stale-clients">
+        <tr><td colspan="7">Загрузка списка…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</details>
+
+<!-- История выбранного клиента -->
+<div class="tablewrap">
+  <div class="card">
+    <h3>История подключения клиента</h3>
+    <p class="muted">
+      Выбери устройство, чтобы сравнить уровень сигнала и повторные передачи
+      по сохранённым измерениям.
+    </p>
+    <label for="wifi-history-client">Устройство:</label>
+    <select id="wifi-history-client">
+      <option value="">Загрузка клиентов…</option>
+    </select>
+    <canvas id="wifi-client-history-chart"></canvas>
   </div>
 </div>
 
 <!-- История инцидентов Wi-Fi -->
-<div class="tablewrap">
+<details class="tablewrap diagnostic"><summary>История аномалий Wi-Fi</summary>
   <div class="card">
     <h3>История аномалий Wi-Fi</h3>
     <p class="muted">
@@ -188,7 +279,7 @@
       </tbody>
     </table>
   </div>
-</div>
+</details>
 
 <!-- Автоматически вычисляемые аномалии Wi-Fi -->
 <div class="tablewrap">
@@ -416,6 +507,7 @@ async function refreshWifiClients() {
           <td class="${retriesClass}">${escapeHTML(retriesText)}</td>
           <td>${escapeHTML(satisfactionText)}</td>
           <td>${escapeHTML(client.client_status || '—')}</td>
+          <td>${(client.mac || client.mac_address) ? `<button type="button" data-analyze-mac="${escapeHTML(client.mac || client.mac_address)}">Анализировать</button>` : '<span>Нет MAC</span>'}</td>
         </tr>
       `;
     }).join('');
@@ -432,6 +524,54 @@ async function refreshWifiClients() {
   }
 }
 
+
+
+document.getElementById('wifi-clients').addEventListener('click', async event => {
+  const button = event.target.closest('button[data-analyze-mac]');
+  if (!button) return;
+
+  const mac = button.dataset.analyzeMac;
+  const panel = document.getElementById('wifi-ai-panel');
+  const title = document.getElementById('wifi-ai-title');
+  const status = document.getElementById('wifi-ai-status');
+  const result = document.getElementById('wifi-ai-result');
+
+  panel.style.display = 'block';
+  title.textContent = `Анализ Wi-Fi-клиента: ${mac}`;
+  status.textContent = 'Запрашиваем анализ YandexGPT…';
+  result.textContent = '';
+  button.disabled = true;
+
+  try {
+    const response = await fetch(
+      `/api/wifi/analyze-client?mac=${encodeURIComponent(mac)}`,
+      { headers: { 'Accept': 'application/json' } }
+    );
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || data.detail || `HTTP ${response.status}`);
+    }
+
+    const report = data.analysis ?? data.report ?? data.result;
+    if (report === undefined || report === null || report === '') {
+      throw new Error(data.error || 'Сервер не вернул текст анализа.');
+    }
+
+    result.textContent = typeof report === 'string'
+      ? report
+      : JSON.stringify(report, null, 2);
+    status.textContent = data.history_count !== undefined
+      ? `Измерений в истории: ${data.history_count}`
+      : 'Анализ получен';
+  } catch (error) {
+    status.textContent = `Не удалось получить анализ: ${error.message}`;
+  } finally {
+    button.disabled = false;
+  }
+
+  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+});
 
 // Аномалии вычисляются сервером по последнему сохранённому снимку.
 async function refreshWifiAnomalyHistory() {
@@ -471,6 +611,159 @@ async function refreshWifiAnomalyHistory() {
   } catch (error) {
     console.error('Ошибка загрузки истории Wi-Fi:', error);
     tbody.innerHTML = '<tr><td colspan="10" class="error">Не удалось загрузить историю. Проверь API /api/wifi/anomaly-history.</td></tr>';
+  }
+}
+
+
+// Получение массива из ответов API с разными названиями поля.
+function wifiRows(data, keys) {
+  if (Array.isArray(data)) return data;
+  for (const key of keys) {
+    if (Array.isArray(data?.[key])) return data[key];
+  }
+  return [];
+}
+
+// История количества клиентов по точкам доступа.
+async function refreshWifiApHistory() {
+  try {
+    const data = await jget('/api/wifi/ap-history?limit=100');
+    const rows = wifiRows(data, ['history', 'samples', 'rows', 'results', 'data']);
+
+    const times = [...new Set(rows.map(r => r.collected_at).filter(Boolean))]
+      .sort((a, b) => new Date(a) - new Date(b));
+    const aps = [...new Set(rows.map(r => r.ap_name || r.ap_mac || 'Без имени'))];
+
+    wifiApHistoryChart.data.labels = times.map(t =>
+      new Date(t).toLocaleString('ru-RU', {
+        day: '2-digit', month: '2-digit',
+        hour: '2-digit', minute: '2-digit'
+      })
+    );
+
+    wifiApHistoryChart.data.datasets = aps.map((ap, index) => ({
+      label: ap,
+      data: times.map(time => {
+        const row = rows.find(r =>
+          r.collected_at === time &&
+          (r.ap_name || r.ap_mac || 'Без имени') === ap
+        );
+        return row ? Number(row.client_count) || 0 : null;
+      }),
+      tension: 0.25,
+      spanGaps: false
+    }));
+
+    wifiApHistoryChart.update();
+
+    if (!rows.length) {
+      console.warn('История точек доступа пока пуста или формат API неизвестен.', data);
+    }
+  } catch (error) {
+    console.error('Ошибка истории точек доступа:', error);
+  }
+}
+
+// Устройства, которые давно не появлялись в измерениях.
+async function refreshWifiStaleClients() {
+  const tbody = document.getElementById('wifi-stale-clients');
+
+  try {
+    const data = await jget('/api/wifi/stale-clients?hours=24');
+    const rows = wifiRows(data, [
+      'clients', 'stale_clients', 'rows', 'results', 'data'
+    ]);
+
+    if (!rows.length) {
+      tbody.innerHTML =
+        '<tr><td colspan="7">Нет подходящих записей или список пуст</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = rows.map(client => {
+      const lastSeen = client.last_seen
+        ? new Date(client.last_seen).toLocaleString('ru-RU')
+        : '—';
+      const hours = Number(client.hours_since_seen);
+
+      return `
+        <tr>
+          <td>${escapeHTML(client.hostname || 'Без имени')}</td>
+          <td>${escapeHTML(client.mac || '—')}</td>
+          <td>${escapeHTML(client.ip || '—')}</td>
+          <td>${escapeHTML(client.last_ap || '—')}</td>
+          <td>${escapeHTML(client.last_ssid || '—')}</td>
+          <td>${escapeHTML(lastSeen)}</td>
+          <td>${Number.isFinite(hours) ? hours.toFixed(1) : '—'}</td>
+        </tr>
+      `;
+    }).join('');
+  } catch (error) {
+    console.error('Ошибка списка давно не наблюдавшихся клиентов:', error);
+    tbody.innerHTML =
+      '<tr><td colspan="7" class="error">Не удалось загрузить список</td></tr>';
+  }
+}
+
+// История выбранного MAC-адреса.
+async function refreshWifiClientHistory() {
+  const select = document.getElementById('wifi-history-client');
+
+  try {
+    const clientData = await jget('/api/wifi/clients');
+    const clients = wifiRows(clientData, ['clients', 'rows', 'results', 'data']);
+    const previous = select.value;
+
+    const unique = [...new Map(
+      clients.filter(c => c.mac).map(c => [c.mac, c])
+    ).values()];
+
+    select.innerHTML = unique.map(c => {
+      const label = `${c.hostname || 'Без имени'} — ${c.mac}`;
+      return `<option value="${escapeHTML(c.mac)}">${escapeHTML(label)}</option>`;
+    }).join('');
+
+    if (unique.some(c => c.mac === previous)) select.value = previous;
+    if (!select.value && unique.length) select.value = unique[0].mac;
+
+    const mac = select.value;
+    if (!mac) {
+      wifiClientHistoryChart.data.labels = [];
+      wifiClientHistoryChart.data.datasets.forEach(ds => ds.data = []);
+      wifiClientHistoryChart.update();
+      return;
+    }
+
+    const url = '/api/wifi/client-history?mac=' +
+      encodeURIComponent(mac) + '&limit=100';
+    const data = await jget(url);
+    const rows = wifiRows(data, ['history', 'samples', 'rows', 'results', 'data'])
+      .slice()
+      .sort((a, b) => new Date(a.collected_at) - new Date(b.collected_at));
+
+    wifiClientHistoryChart.data.labels = rows.map(r =>
+      r.collected_at
+        ? new Date(r.collected_at).toLocaleString('ru-RU', {
+            day: '2-digit', month: '2-digit',
+            hour: '2-digit', minute: '2-digit'
+          })
+        : '—'
+    );
+
+    wifiClientHistoryChart.data.datasets[0].data = rows.map(r =>
+      r.signal_dbm == null ? null : Number(r.signal_dbm)
+    );
+    wifiClientHistoryChart.data.datasets[1].data = rows.map(r =>
+      r.wifi_tx_retries_percentage == null
+        ? null : Number(r.wifi_tx_retries_percentage)
+    );
+    wifiClientHistoryChart.update();
+
+    if (!rows.length) {
+      console.warn('Для выбранного клиента история пока не найдена.', data);
+    }
+  } catch (error) {
+    console.error('Ошибка истории клиента:', error);
   }
 }
 
@@ -589,13 +882,84 @@ const lineChart = new Chart(document.getElementById('line'), {
   }
 });
 
+
+const wifiApHistoryChart = new Chart(
+  document.getElementById('wifi-ap-history-chart'), {
+    type: 'line',
+    data: { labels: [], datasets: [] },
+    options: {
+      responsive: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { position: 'bottom' } },
+      scales: {
+        y: {
+          beginAtZero: true,
+          title: { display: true, text: 'Клиенты' },
+          ticks: { precision: 0 }
+        }
+      }
+    }
+  }
+);
+
+const wifiClientHistoryChart = new Chart(
+  document.getElementById('wifi-client-history-chart'), {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [
+        {
+          label: 'Сигнал, dBm',
+          data: [],
+          yAxisID: 'y',
+          tension: 0.2
+        },
+        {
+          label: 'Повторные передачи, %',
+          data: [],
+          yAxisID: 'y1',
+          tension: 0.2
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { position: 'bottom' } },
+      scales: {
+        y: {
+          type: 'linear',
+          position: 'left',
+          title: { display: true, text: 'Сигнал, dBm' }
+        },
+        y1: {
+          type: 'linear',
+          position: 'right',
+          beginAtZero: true,
+          title: { display: true, text: 'Повторные передачи, %' },
+          grid: { drawOnChartArea: false }
+        }
+      }
+    }
+  }
+);
+
+document.getElementById('wifi-history-client')
+  .addEventListener('change', refreshWifiClientHistory);
+
 refresh();
 refreshWifiHistory();
 refreshWifiClients();
+refreshWifiApHistory();
+refreshWifiStaleClients();
+refreshWifiClientHistory();
 
 setInterval(refresh, 30000);
 setInterval(refreshWifiHistory, 30000);
 setInterval(refreshWifiClients, 30000);
+setInterval(refreshWifiApHistory, 30000);
+setInterval(refreshWifiStaleClients, 30000);
+setInterval(refreshWifiClientHistory, 30000);
 setInterval(refreshWifiAnomalies, 30000);
 setInterval(refreshWifiAnomalyHistory, 30000);
 </script>

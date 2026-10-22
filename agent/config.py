@@ -33,9 +33,14 @@ LAN_SUBNETS = tuple(
 # --- LLM (опционально). OpenAI-совместимый API ---
 # Если LLM_API_KEY не задан — агент работает в детерминированном режиме
 # (ScriptedPlanner), весь функционал сохраняется.
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "openai").strip().lower()
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://api.openai.com/v1")
 LLM_MODEL = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+
+# Дополнительные настройки Yandex Cloud AI Studio.
+YANDEX_API_KEY = os.environ.get("YANDEX_API_KEY", "")
+YANDEX_FOLDER_ID = os.environ.get("YANDEX_FOLDER_ID", "")
 
 # --- Уведомления по email (опционально) ---
 # Без SMTP_PASSWORD уведомления выключены, остальное работает.

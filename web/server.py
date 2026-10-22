@@ -17,6 +17,8 @@ from urllib.parse import urlparse, parse_qs
 from agent import config
 from agent.agent import Agent
 from agent.db import DB
+from agent.planner import build_llm
+import re
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
@@ -182,6 +184,104 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"snapshots": db.wifi_snapshots(100)})
         elif route == "/api/wifi/clients":
             self._json({"clients": db.wifi_clients(500)})
+        elif route == "/api/wifi/analyze-client":
+            mac = query.get("mac", [""])[0].strip()
+
+            if not re.fullmatch(r"[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5}", mac):
+                self._json({"error": "укажи корректный MAC-адрес"}, 400)
+                return
+
+            history = db.wifi_client_history(mac, 20)
+            if not history:
+                self._json({"error": "история измерений клиента не найдена"}, 404)
+                return
+
+            llm = build_llm()
+            if llm is None:
+                self._json({"error": "LLM не настроена: API-ключ отсутствует"}, 503)
+                return
+
+            fields = (
+                "collected_at", "hostname", "ip", "ssid", "ap_name",
+                "signal_dbm", "channel", "radio", "tx_rate", "rx_rate",
+                "wifi_tx_retries_percentage", "satisfaction", "client_status"
+            )
+            facts = [
+                {key: row.get(key) for key in fields}
+                for row in history
+            ]
+
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "Ты аналитик Wi-Fi-сети. Анализируй только переданные "
+                        "измерения. Отвечай по-русски. Не выдумывай факты и "
+                        "не выдавай гипотезы за доказанные причины. Если данных "
+                        "недостаточно, прямо скажи об этом. Структура ответа: "
+                        "1. Краткий вывод. 2. Подтверждённые факты и динамика. "
+                        "3. Возможные объяснения. 4. Практические рекомендации. "
+                        "5. Что проверить при следующем измерении. "
+                        "Не утверждай, что проблема решена без новых измерений."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "Проанализируй историю Wi-Fi-клиента. "
+                        "Измерения в хронологическом порядке (JSON):\n"
+                        + json.dumps(facts, ensure_ascii=False, default=str)
+                    )
+                }
+            ]
+
+            try:
+                analysis = llm.chat(messages)
+            except Exception as exc:
+                print(f"[llm-wifi-analysis] Ошибка: {type(exc).__name__}")
+                self._json({"error": "LLM не смогла выполнить анализ"}, 502)
+                return
+
+            if not analysis.strip():
+                self._json({"error": "LLM вернула пустой ответ"}, 502)
+                return
+
+            latest = facts[-1]
+            self._json({
+                "mac": mac,
+                "hostname": latest.get("hostname"),
+                "history_count": len(facts),
+                "latest": latest,
+                "analysis": analysis,
+            })
+        elif route == "/api/wifi/client-history":
+            mac = query.get("mac", [""])[0].strip()
+            if not mac or len(mac) > 64:
+                self._json({"error": "укажи MAC в параметре mac"}, 400)
+            else:
+                try:
+                    limit = int(query.get("limit", ["100"])[0])
+                except ValueError:
+                    limit = 100
+                self._json({
+                    "mac": mac,
+                    "history": db.wifi_client_history(mac, limit),
+                })
+        elif route == "/api/wifi/ap-history":
+            try:
+                limit = int(query.get("limit", ["100"])[0])
+            except ValueError:
+                limit = 100
+            self._json({"history": db.wifi_ap_history(limit)})
+        elif route == "/api/wifi/stale-clients":
+            try:
+                hours = int(query.get("hours", ["24"])[0])
+            except ValueError:
+                hours = 24
+            self._json({
+                "threshold_hours": max(1, min(hours, 8760)),
+                "clients": db.wifi_stale_clients(hours),
+            })
         elif route == "/api/wifi/anomalies":
             self._json({"anomalies": build_wifi_anomalies(db.wifi_clients(500))})
         elif route == "/api/wifi/anomaly-history":

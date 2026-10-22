@@ -124,15 +124,39 @@ class Categorizer:
 # ---------------------------------------------------------------------------
 
 class LlmClient:
-    def __init__(self, api_key: str, base_url: str, model: str):
-        self.api_key, self.base_url, self.model = api_key, base_url.rstrip("/"), model
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str,
+        model: str,
+        provider: str = "openai",
+        folder_id: str = "",
+    ):
+        self.api_key = api_key
+        self.base_url = base_url.rstrip("/")
+        self.model = model
+        self.provider = provider
+        self.folder_id = folder_id
 
     def _post(self, payload: dict) -> dict:
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": (
+                f"Api-Key {self.api_key}"
+                if self.provider == "yandex"
+                else f"Bearer {self.api_key}"
+            ),
+        }
+
+        if self.provider == "yandex":
+            if not self.folder_id:
+                raise RuntimeError("Для Yandex Cloud не задан YANDEX_FOLDER_ID")
+            headers["OpenAI-Project"] = self.folder_id
+
         req = urllib.request.Request(
             f"{self.base_url}/chat/completions",
             data=json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json",
-                     "Authorization": f"Bearer {self.api_key}"},
+            headers=headers,
         )
         try:
             with urllib.request.urlopen(req, timeout=60) as resp:
@@ -154,9 +178,24 @@ class LlmClient:
 
 
 def build_llm() -> LlmClient | None:
+    if config.LLM_PROVIDER == "yandex":
+        if not config.YANDEX_API_KEY or not config.YANDEX_FOLDER_ID:
+            return None
+        return LlmClient(
+            config.YANDEX_API_KEY,
+            config.LLM_BASE_URL,
+            config.LLM_MODEL,
+            provider="yandex",
+            folder_id=config.YANDEX_FOLDER_ID,
+        )
+
     if not config.LLM_API_KEY:
         return None
-    return LlmClient(config.LLM_API_KEY, config.LLM_BASE_URL, config.LLM_MODEL)
+    return LlmClient(
+        config.LLM_API_KEY,
+        config.LLM_BASE_URL,
+        config.LLM_MODEL,
+    )
 
 
 # ---------------------------------------------------------------------------
