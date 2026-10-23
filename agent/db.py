@@ -274,6 +274,33 @@ class DB:
                 (limit,),
             ).fetchall()
         ]
+    def wifi_history_clients(self, limit: int = 5000) -> list[dict]:
+        """Вернуть всех Wi-Fi-клиентов, у которых есть сохранённые измерения."""
+        rows = self.conn.execute(
+            """
+            SELECT
+                s.mac,
+                (
+                    SELECT s2.hostname
+                    FROM wifi_client_samples s2
+                    WHERE lower(s2.mac) = lower(s.mac)
+                      AND s2.hostname IS NOT NULL
+                      AND trim(s2.hostname) != ''
+                    ORDER BY s2.collected_at DESC
+                    LIMIT 1
+                ) AS hostname,
+                COUNT(*) AS measurements,
+                MAX(s.collected_at) AS last_seen
+            FROM wifi_client_samples s
+            WHERE s.mac IS NOT NULL
+              AND trim(s.mac) != ''
+            GROUP BY lower(s.mac)
+            ORDER BY last_seen DESC
+            LIMIT ?
+            """,
+            (max(1, min(int(limit), 10000)),),
+        ).fetchall()
+        return [dict(row) for row in rows]
     def update_wifi_anomaly_history(
         self, collected_at: str, clients: list[dict]
     ) -> int:

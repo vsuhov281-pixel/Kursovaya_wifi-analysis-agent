@@ -97,6 +97,20 @@
     .kpi .num { font-size: 25px; }
   }
 
+
+  #wifi-overall-report { padding: 0 28px 18px; max-width: 1600px; margin: 0 auto; }
+  .wifi-report-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(145px,1fr)); gap:12px; margin-bottom:14px; }
+  .wifi-report-kpi { background:var(--card); border:1px solid #26304a; border-radius:10px; padding:14px; }
+  .wifi-report-kpi .label { color:var(--muted); font-size:13px; }
+  .wifi-report-kpi .value { font-size:26px; font-weight:700; margin-top:3px; }
+  .wifi-report-columns { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr)); gap:14px; }
+  .wifi-report-columns .card { min-width:0; overflow-x:auto; }
+  .wifi-report-note { color:var(--muted); font-size:12px; margin:8px 0 0; }
+  .wifi-report-list { padding-left:20px; margin:8px 0; }
+  .wifi-report-list li { margin:7px 0; }
+  .wifi-report-status { margin:0 0 12px; font-size:13px; color:var(--muted); }
+  @media(max-width:700px) { #wifi-overall-report { padding:0 16px 16px; } }
+
 </style>
 </head>
 <body>
@@ -109,6 +123,48 @@
 </header>
 
 <div class="grid" id="kpis"></div>
+
+<section id="wifi-overall-report">
+  <h2 style="font-size:19px;margin:8px 0 4px">Общий отчёт Wi-Fi</h2>
+  <p id="wifi-report-updated" class="wifi-report-status">Загрузка общего отчёта…</p>
+  <div id="wifi-report-kpis" class="wifi-report-grid">
+    <div class="wifi-report-kpi">Загрузка показателей…</div>
+  </div>
+  <div class="wifi-report-columns">
+    <div class="card">
+      <h3>Клиенты по точкам доступа</h3>
+      <table>
+        <thead><tr><th>Точка доступа</th><th>Клиенты</th></tr></thead>
+        <tbody id="wifi-report-aps"><tr><td colspan="2">Загрузка…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="card">
+      <h3>Радиоканалы</h3>
+      <table>
+        <thead><tr><th>Точка доступа</th><th>Радио</th><th>Канал</th><th>Загрузка</th><th>Клиенты</th></tr></thead>
+        <tbody id="wifi-report-radios"><tr><td colspan="5">Загрузка…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="card">
+      <h3>Рекомендации</h3>
+      <ul id="wifi-report-recommendations" class="wifi-report-list">
+        <li>Загрузка рекомендаций…</li>
+      </ul>
+      <p class="wifi-report-note">Рекомендации формируются по сохранённым измерениям и требуют проверки в контексте лаборатории.</p>
+    </div>
+    <div class="card">
+      <h3>Текущие аномалии</h3>
+      <p id="wifi-report-anomaly-summary">Загрузка…</p>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>Устройство</th><th>Точка доступа</th><th>Проблема</th><th>Уровень</th></tr></thead>
+          <tbody id="wifi-report-anomalies"><tr><td colspan="4">Загрузка…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
 
 <div class="charts">
   <div class="card">
@@ -248,6 +304,42 @@
       <option value="">Загрузка клиентов…</option>
     </select>
     <canvas id="wifi-client-history-chart"></canvas>
+  </div>
+</div>
+
+<!-- История роуминга Wi-Fi -->
+<div class="tablewrap">
+  <div class="card">
+    <h3>Перемещения клиента между точками доступа</h3>
+    <p class="muted">
+      Выбери устройство. График показывает переходы между AP по событиям контроллера.
+      Смена радиоканала отображается отдельно и не считается переходом между AP.
+    </p>
+    <label for="wifi-roaming-client">Устройство:</label>
+    <select id="wifi-roaming-client">
+      <option value="">Загрузка устройств…</option>
+    </select>
+    <p id="wifi-roaming-summary" class="muted">Загрузка истории роуминга…</p>
+    <canvas id="wifi-roaming-chart"></canvas>
+    <h4>События роуминга</h4>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Время</th>
+            <th>Тип события</th>
+            <th>Исходная AP</th>
+            <th>Целевая / текущая AP</th>
+            <th>Канал</th>
+            <th>SSID</th>
+            <th>Сообщение контроллера</th>
+          </tr>
+        </thead>
+        <tbody id="wifi-roaming-events">
+          <tr><td colspan="7">Выбери устройство</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </div>
 
@@ -400,6 +492,106 @@ async function refresh() {
 }
 
 // История снимков UniFi.
+
+async function refreshWifiReport() {
+  const status = document.getElementById('wifi-report-updated');
+  try {
+    const report = await jget('/api/wifi/report');
+    const summary = report.summary || {};
+    const snapshot = report.latest_snapshot || {};
+
+    const fmt = value => value == null ? '—' : value;
+    const number = value => value == null || !Number.isFinite(Number(value))
+      ? '—' : Number(value).toLocaleString('ru-RU', { maximumFractionDigits: 1 });
+
+    const metrics = [
+      ['Wi-Fi-клиенты', summary.clients],
+      ['Точки доступа', summary.access_points],
+      ['Текущие аномалии', summary.anomalies],
+      ['Критические аномалии', summary.high_anomalies],
+      ['Неактивны более 24 ч', summary.stale_clients_24h],
+      ['События роуминга всего', summary.roaming_events_total],
+      ['Средний сигнал, dBm', summary.average_signal_dbm],
+      ['Средние повторы, %', summary.average_retries_percent],
+      ['Средний Satisfaction', summary.average_satisfaction]
+    ];
+
+    document.getElementById('wifi-report-kpis').innerHTML = metrics.map(([label, value]) => `
+      <div class="wifi-report-kpi">
+        <div class="label">${escapeHTML(label)}</div>
+        <div class="value">${escapeHTML(number(value))}</div>
+      </div>
+    `).join('');
+
+    const collectedAt = snapshot.collected_at
+      ? new Date(snapshot.collected_at).toLocaleString('ru-RU')
+      : 'время неизвестно';
+    const generatedAt = report.generated_at
+      ? new Date(report.generated_at).toLocaleString('ru-RU')
+      : 'время неизвестно';
+
+    status.textContent =
+      `Последний сбор: ${collectedAt} · Отчёт обновлён: ${generatedAt} · Статус: ${snapshot.status || 'нет данных'}`;
+
+    const aps = Array.isArray(report.access_points) ? report.access_points : [];
+    document.getElementById('wifi-report-aps').innerHTML = aps.length
+      ? aps.map(ap => `<tr><td>${escapeHTML(ap.name || 'Без имени')}</td><td>${escapeHTML(fmt(ap.clients))}</td></tr>`).join('')
+      : '<tr><td colspan="2">Нет данных о точках доступа</td></tr>';
+
+    const radios = Array.isArray(report.radios) ? report.radios : [];
+    document.getElementById('wifi-report-radios').innerHTML = radios.length
+      ? radios.map(radio => `
+          <tr>
+            <td>${escapeHTML(radio.ap_name || '—')}</td>
+            <td>${escapeHTML(radio.radio || '—')}</td>
+            <td>${escapeHTML(fmt(radio.channel))}</td>
+            <td>${escapeHTML(fmt(radio.channel_utilization))}%</td>
+            <td>${escapeHTML(fmt(radio.client_count))}</td>
+          </tr>
+        `).join('')
+      : '<tr><td colspan="5">Нет данных о радиоканалах</td></tr>';
+
+    const recommendations = Array.isArray(report.recommendations)
+      ? report.recommendations : [];
+    document.getElementById('wifi-report-recommendations').innerHTML =
+      recommendations.length
+        ? recommendations.map(item => {
+            const text = typeof item === 'string'
+              ? item
+              : (item.message || item.recommendation || item.text || JSON.stringify(item));
+            return `<li>${escapeHTML(text)}</li>`;
+          }).join('')
+        : '<li>Сервер не сформировал рекомендации для текущего снимка.</li>';
+
+    const anomalies = Array.isArray(report.anomalies) ? report.anomalies : [];
+    document.getElementById('wifi-report-anomaly-summary').textContent =
+      `Всего: ${summary.anomalies ?? anomalies.length}; высокий уровень: ${summary.high_anomalies ?? '—'}.`;
+
+    document.getElementById('wifi-report-anomalies').innerHTML = anomalies.length
+      ? anomalies.slice(0, 12).map(item => {
+          const causes = Array.isArray(item.causes)
+            ? item.causes.join('; ')
+            : (item.causes || item.reason || 'Требуется проверка');
+          const severity = item.severity === 'high' ? 'Высокий'
+            : item.severity === 'medium' ? 'Средний'
+            : (item.severity || 'Наблюдение');
+          return `<tr>
+            <td>${escapeHTML(item.hostname || item.ip || item.mac || 'Без имени')}</td>
+            <td>${escapeHTML(item.ap_name || '—')}</td>
+            <td>${escapeHTML(causes)}</td>
+            <td>${escapeHTML(severity)}</td>
+          </tr>`;
+        }).join('')
+      : '<tr><td colspan="4">Нет текущих аномалий в отчёте</td></tr>';
+
+  } catch (error) {
+    console.error('Ошибка загрузки общего Wi-Fi-отчёта:', error);
+    status.textContent = 'Не удалось загрузить общий отчёт. Проверь API /api/wifi/report.';
+    document.getElementById('wifi-report-kpis').innerHTML =
+      '<div class="wifi-report-kpi error">Ошибка загрузки данных</div>';
+  }
+}
+
 async function refreshWifiHistory() {
   const tbody = document.getElementById('wifi-history');
 
@@ -710,7 +902,7 @@ async function refreshWifiClientHistory() {
   const select = document.getElementById('wifi-history-client');
 
   try {
-    const clientData = await jget('/api/wifi/clients');
+    const clientData = await jget('/api/wifi/history/clients');
     const clients = wifiRows(clientData, ['clients', 'rows', 'results', 'data']);
     const previous = select.value;
 
@@ -764,6 +956,117 @@ async function refreshWifiClientHistory() {
     }
   } catch (error) {
     console.error('Ошибка истории клиента:', error);
+  }
+}
+
+async function refreshWifiRoaming() {
+  const select = document.getElementById('wifi-roaming-client');
+  const summary = document.getElementById('wifi-roaming-summary');
+  const tbody = document.getElementById('wifi-roaming-events');
+
+  try {
+    const previous = select.value;
+    const clientsData = await jget('/api/wifi/roaming/clients');
+    const clients = clientsData.clients || [];
+
+    select.innerHTML = clients.map(client => {
+      const label = client.hostname
+        ? `${client.hostname} (${client.mac})`
+        : client.mac;
+      return `<option value="${escapeHTML(client.mac)}">${escapeHTML(label)} — ${Number(client.event_count) || 0} событий</option>`;
+    }).join('');
+
+    if (clients.some(client => client.mac === previous)) {
+      select.value = previous;
+    } else if (clients.length) {
+      select.value = clients[0].mac;
+    }
+
+    if (!select.value) {
+      summary.textContent = 'События роуминга не найдены.';
+      tbody.innerHTML = '<tr><td colspan="7">Нет событий для отображения</td></tr>';
+      wifiRoamingChart.data.labels = [];
+      wifiRoamingChart.data.datasets[0].data = [];
+      wifiRoamingChart.data.datasets[0].pointLabels = [];
+      wifiRoamingChart.options.scales.y.ticks.callback = value => value;
+      wifiRoamingChart.update();
+      return;
+    }
+
+    const data = await jget(
+      '/api/wifi/roaming?mac=' + encodeURIComponent(select.value)
+    );
+    const events = (data.events || []).slice().sort(
+      (a, b) => new Date(a.time) - new Date(b.time)
+    );
+
+    const transitions = events.filter(
+      event => event.is_ap_transition && event.target_ap_mac
+    );
+
+    const apLabels = [];
+    for (const event of transitions) {
+      const from = event.source_ap_name || event.source_ap_mac;
+      const to = event.target_ap_name || event.target_ap_mac;
+      if (from && !apLabels.includes(from)) apLabels.push(from);
+      if (to && !apLabels.includes(to)) apLabels.push(to);
+    }
+
+    wifiRoamingChart.data.labels = transitions.map(event =>
+      event.time ? new Date(event.time).toLocaleString('ru-RU', {
+        day: '2-digit', month: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit'
+      }) : '—'
+    );
+
+    wifiRoamingChart.data.datasets[0].data = transitions.map(event =>
+      apLabels.indexOf(event.target_ap_name || event.target_ap_mac)
+    );
+    wifiRoamingChart.data.datasets[0].pointLabels = transitions.map(event =>
+      `${event.source_ap_name || event.source_ap_mac} → ${event.target_ap_name || event.target_ap_mac}`
+    );
+    wifiRoamingChart.options.scales.y.ticks.callback = value =>
+      apLabels[value] ?? '';
+    wifiRoamingChart.update();
+
+    const radioEvents = events.filter(
+      event => event.event_type === 'EVT_WU_RoamRadio'
+    ).length;
+
+    summary.textContent =
+      `Всего событий: ${events.length}. Переходов между AP: ${transitions.length}. ` +
+      `Событий изменения радиоканала: ${radioEvents}.`;
+
+    if (!events.length) {
+      tbody.innerHTML = '<tr><td colspan="7">История для устройства не найдена</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = events.slice().reverse().map(event => {
+      const isRoam = event.event_type === 'EVT_WU_Roam';
+      const typeName = isRoam ? 'Переход между AP'
+        : event.event_type === 'EVT_WU_RoamRadio' ? 'Изменение радиоканала'
+        : event.event_type || 'Другое';
+      const sourceAp = event.source_ap_name || event.source_ap_mac || '—';
+      const targetAp = event.target_ap_name || event.target_ap_mac || '—';
+      const channel = [event.channel_from, event.channel_to]
+        .filter(Boolean).join(' → ') || '—';
+      const time = event.time
+        ? new Date(event.time).toLocaleString('ru-RU') : '—';
+
+      return `<tr>
+        <td>${escapeHTML(time)}</td>
+        <td>${escapeHTML(typeName)}</td>
+        <td>${escapeHTML(isRoam ? sourceAp : '—')}</td>
+        <td>${escapeHTML(targetAp)}</td>
+        <td>${escapeHTML(channel)}</td>
+        <td>${escapeHTML(event.ssid || '—')}</td>
+        <td>${escapeHTML(event.message || '—')}</td>
+      </tr>`;
+    }).join('');
+  } catch (error) {
+    console.error('Ошибка истории роуминга:', error);
+    summary.textContent = 'Не удалось загрузить историю роуминга. Подробности в консоли браузера.';
   }
 }
 
@@ -832,6 +1135,7 @@ async function scanNow() {
     setTimeout(() => {
       refresh();
       refreshWifiHistory();
+refreshWifiReport();
       refreshWifiClients();
 refreshWifiAnomalies();
 refreshWifiAnomalyHistory();
@@ -902,6 +1206,51 @@ const wifiApHistoryChart = new Chart(
   }
 );
 
+const wifiRoamingChart = new Chart(
+  document.getElementById('wifi-roaming-chart'), {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [{
+        label: 'Точка доступа после перехода',
+        data: [],
+        pointLabels: [],
+        stepped: true,
+        tension: 0,
+        pointRadius: 4
+      }]
+    },
+    options: {
+      responsive: true,
+      interaction: { mode: 'nearest', intersect: true },
+      plugins: {
+        legend: { position: 'bottom' },
+        tooltip: {
+          callbacks: {
+            title: items => items.length ? items[0].label : '',
+            label: context =>
+              context.dataset.pointLabels?.[context.dataIndex] ||
+              'Точка доступа'
+          }
+        }
+      },
+      scales: {
+        x: {
+          title: { display: true, text: 'Время перехода' }
+        },
+        y: {
+          type: 'linear',
+          ticks: {
+            stepSize: 1,
+            callback: value => value
+          },
+          title: { display: true, text: 'Точка доступа' }
+        }
+      }
+    }
+  }
+);
+
 const wifiClientHistoryChart = new Chart(
   document.getElementById('wifi-client-history-chart'), {
     type: 'line',
@@ -946,6 +1295,8 @@ const wifiClientHistoryChart = new Chart(
 
 document.getElementById('wifi-history-client')
   .addEventListener('change', refreshWifiClientHistory);
+document.getElementById('wifi-roaming-client')
+  .addEventListener('change', refreshWifiRoaming);
 
 refresh();
 refreshWifiHistory();
@@ -953,13 +1304,16 @@ refreshWifiClients();
 refreshWifiApHistory();
 refreshWifiStaleClients();
 refreshWifiClientHistory();
+refreshWifiRoaming();
 
 setInterval(refresh, 30000);
 setInterval(refreshWifiHistory, 30000);
+setInterval(refreshWifiReport, 30000);
 setInterval(refreshWifiClients, 30000);
 setInterval(refreshWifiApHistory, 30000);
 setInterval(refreshWifiStaleClients, 30000);
 setInterval(refreshWifiClientHistory, 30000);
+setInterval(refreshWifiRoaming, 30000);
 setInterval(refreshWifiAnomalies, 30000);
 setInterval(refreshWifiAnomalyHistory, 30000);
 </script>
